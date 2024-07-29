@@ -8,6 +8,7 @@
 //#include <chrono>
 #include "dido_spi.h"
 #include "shoalbot_slave_i2c.h"
+#include "dmx_485.h"
 
 #define JETSON_24 GPIO_NUM_0
 #define DI_1 GPIO_NUM_1
@@ -82,6 +83,9 @@ DI_DO_SPI_config DD_spi_config_1 = {
 	.bus_init = true,
 };
 DI_DO_SPI di1(&DD_spi_config_1);
+
+DMX::AMRState amr_state = DMX::AMRState::AMR_IDLE;
+
 /*
 static void IRAM_ATTR estop_isr_handler(void* arg) {
     uint32_t gpio_num = (uint32_t) arg;
@@ -235,18 +239,28 @@ void reset_gpio() {
 	gpio_set_pull_mode(BOOTKEY, GPIO_PULLUP_ONLY);
 }
 
+void rs485_task(void *arg) { // DMX task
+	while (1) {
+		DMX::SetAMRState(DMX::AMRState::AMR_ERROR, 33);;  // Update LED color based on amr_state.
+		vTaskDelay(pdMS_TO_TICKS(2000));
+	}
+	vTaskDelete(NULL);
+}
+
 extern "C" void app_main(void) {
 	reset_gpio();
 	gpio_set_level(BMS, 1);
 	gpio_set_level(PASS_1, 1); // Kinco enable 
 	gpio_set_level(PASS_2, 1); // N.C.
-	vTaskDelay(pdMS_TO_TICKS(50));
-//	gpio_set_level(DO_0, 1); // Lidar 24V
-//	gpio_set_level(DO_1, 1); // LED	24V
-//	gpio_set_level(DO_2, 0); // Relay K2 to close Auto Charging's 48V loop
-//	gpio_set_level(DO_3, 1); // Relay K3 for Kinco Power
+	vTaskDelay(pdMS_TO_TICKS(100));
+	gpio_set_level(DO_0, 1); // Lidar 24V
+	gpio_set_level(DO_1, 1); // LED	24V
+	gpio_set_level(DO_2, 0); // Relay K2 to close Auto Charging's 48V loop
+	gpio_set_level(DO_3, 1); // Relay K3 for Kinco Power
 	di0.begin();
 	di1.begin();
+//	DMX::Initialize(DMXDirection::DMX_DIR_OUTPUT, 1, 512);
+//	xTaskCreate(rs485_task, "rs485_task", 16000, NULL, 1, NULL);
 	while(1) {
 		uint16_t dOut = my_i2c.i2c_read();
 		if(my_i2c.get_di() == true) {
