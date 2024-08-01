@@ -15,81 +15,104 @@ shoalbot_slave_i2c::shoalbot_slave_i2c(i2c_slave_config* slave_config) {
     ESP_ERROR_CHECK(i2c_new_slave_device(&slv_conf, &slv_handle));
 }
 
-uint16_t shoalbot_slave_i2c::i2c_read() {
+esp_err_t shoalbot_slave_i2c::i2c_read() {
     uint8_t* data_rcv = (uint8_t *)(malloc(sizeof(uint8_t)));
+    if (data_rcv == NULL) {
+        ESP_LOGE("I2C", "Failed to allocate memory");
+        return ESP_ERR_NO_MEM;
+    }
     *data_rcv = 0;
     QueueHandle_t receive_queue = xQueueCreate(1, sizeof(i2c_slave_rx_done_event_data_t));
     if (receive_queue == NULL) {
         free(data_rcv); 
-        //ESP_LOGE("I2C", "Failed to create queue");
+        ESP_LOGE("I2C", "Failed to create queue");
         return 0; 
     }
 
     cbs.on_recv_done = i2c_slave_rx_done_callback;
-    ESP_ERROR_CHECK(i2c_slave_register_event_callbacks(slv_handle, &cbs, receive_queue));
-    ESP_ERROR_CHECK(i2c_slave_receive(slv_handle, data_rcv, 10));
+    esp_err_t err = i2c_slave_register_event_callbacks(slv_handle, &cbs, receive_queue);
+    if (err != ESP_OK) {
+        free(data_rcv);
+        vQueueDelete(receive_queue);
+        return err;
+    }
+
+    err = i2c_slave_receive(slv_handle, data_rcv, 10);
+    if (err != ESP_OK) {
+        free(data_rcv);
+        vQueueDelete(receive_queue);
+        return err;
+    }
+
     
     i2c_slave_rx_done_event_data_t rx_data;
     if(DO_cnt == 0) {
         parsed_data_DO = 0;
+        parsed_data_NavState = 0;
     }
-    if (xQueueReceive(receive_queue, &rx_data, 10) == pdPASS) {
+
+    if (xQueueReceive(receive_queue, &rx_data, pdMS_TO_TICKS(1000)) == pdPASS) {
         if(DO_ack_flag && DO_cnt == 0) {
-            //ESP_LOGI("I2C", "Data received 1: %d", *data_rcv);
+            // ESP_LOGI("I2C", "Data received 1: %d", *data_rcv);
             parsed_data_DO |= (*data_rcv << 8);
             DO_cnt++;
         }
         else if(DO_ack_flag && DO_cnt == 1) {
-            //ESP_LOGI("I2C", "Data received 2: %d", *data_rcv);
-            parsed_data_DO |= *data_rcv;
+            // ESP_LOGI("I2C", "Data received 2: %d", *data_rcv);
+            parsed_data_DO |= (*data_rcv);
+            DO_cnt++;
+        }
+        else if(DO_ack_flag && DO_cnt == 2) {
+            // ESP_LOGI("I2C", "Data received 3: %d", *data_rcv);
+            parsed_data_NavState |= (*data_rcv << 8);
+            DO_cnt++;
+        }
+        else if(DO_ack_flag && DO_cnt == 3) {
+            // ESP_LOGI("I2C", "Data received 4: %d", *data_rcv);
+            parsed_data_NavState |= *data_rcv;
+            DO_cnt++;
+        }
+        else if(DO_ack_flag && DO_cnt == 4) {
+            parsed_data_BMS = (*data_rcv);
             DO_cnt = 0;
-            //printf("Parsed Data: 0x%04hX\n", parsed_data_DO);
             DO_ack_flag = false;
             new_DO = true;
-            free(data_rcv); 
-            vQueueDelete(receive_queue); 
-            return parsed_data_DO;
         }
-        else if(DI_ack_flag) {
-            i2c_send_DI(current_DI, 3);
-            DI_ack_flag = false;
+        else if(State_ack_flag) {
+            i2c_send_state(current_State, 6);
+            State_ack_flag = false;
         }
-        else if(BMS_ack_flag) {
-            //ESP_LOGI("I2C", "Data received for BMS/PASS: %d", *data_rcv);
-            BMS_ack_flag = false;
-            new_BMS = true;
-            uint16_t rcv_msg = *data_rcv;
-            free(data_rcv); 
-            vQueueDelete(receive_queue); 
-            return rcv_msg;
-        }
-        else if(batSW_ack_flag) {
-            ret = i2c_slave_transmit(slv_handle, &batSW, 1, -1);
-            //printf("batSW sent: %d\n", batSW);
-            if(ret != ESP_OK) {
-                //ESP_LOGE(TAG, "Failed to transmit data");
-            }
-            batSW_ack_flag = false;
-        }
+        // else if(batSW_ack_flag && *data_rcv == 0xAA) {
+        //     //printf("batSW received: %d\n", *data_rcv);
+        //     batSW_ack_flag = false;
+        //     new_batSW = true;
+        //     free(data_rcv); // free allocated memory
+        //     vQueueDelete(receive_queue); // delete the queue to free resources
+        //     return ret;
+        // }
+        // else if(batSW_ack_flag) {
+        //     ret = i2c_slave_transmit(slv_handle, &batSW, 1, -1);
+        //     //printf("batSW sent: %d\n", batSW);
+        //     if(ret != ESP_OK) {
+        //         //ESP_LOGE(TAG, "Failed to transmit data");
+        //     }
+        //     batSW_ack_flag = false;
+        // }
 
-        if(*data_rcv == 0xBB && !DO_ack_flag && !DI_ack_flag && !BMS_ack_flag && !batSW_ack_flag) {
+        if(*data_rcv == 0xBB && !DO_ack_flag && !State_ack_flag && !batSW_ack_flag) {
             DO_ack_flag = true;
             // printf("DO acknowlodged\n");
         }
-        else if(*data_rcv == 0xFF && !DI_ack_flag && !DO_ack_flag && !BMS_ack_flag && !batSW_ack_flag) {
-            DI_ack_flag = true;
-            new_DI = true;
+        else if(*data_rcv == 0xFF && !State_ack_flag && !DO_ack_flag && !batSW_ack_flag) {
+            State_ack_flag = true;
+            new_State = true;
             // printf("DI acknowlodged\n");
         }
-        else if(*data_rcv == 0xCC && !DI_ack_flag && !DO_ack_flag && !BMS_ack_flag && !batSW_ack_flag) {
-            BMS_ack_flag = true;
-            // printf("BMS acknowlodged\n");
-        }
-        else if(*data_rcv == 0xDD && !DI_ack_flag && !DO_ack_flag && !BMS_ack_flag && !batSW_ack_flag) {
-            batSW_ack_flag = true;
-            new_batSW = true;
-            // printf("batSW acknowlodged\n");
-        }
+        // else if(*data_rcv == 0xDD && !State_ack_flag && !DO_ack_flag && !BMS_ack_flag && !batSW_ack_flag) {
+        //     batSW_ack_flag = true;
+        //     new_batSW = true;
+        //     // printf("batSW acknowlodged\n");
+        // }
     } else {
         ESP_LOGE("I2C", "Failed to receive data");
     }
@@ -97,24 +120,25 @@ uint16_t shoalbot_slave_i2c::i2c_read() {
     free(data_rcv); // free allocated memory
     vQueueDelete(receive_queue); // delete the queue to free resources
 
-    return 0;
+    return ESP_OK;
 }
 
-esp_err_t shoalbot_slave_i2c::i2c_send_DI(uint8_t* data, uint8_t index) {
-    for(int i = 0; i < 3; i++) {
+esp_err_t shoalbot_slave_i2c::i2c_send_state(uint8_t* data, uint8_t index) {
+    for(int i = 0; i < index; i++) {
         ret = i2c_slave_transmit(slv_handle, data + i, 1, -1);
-        printf("Data sent: %d\n", *(data + i));
+        // printf("DI sent: %d\n", *(data + i));
         if(ret != ESP_OK) {
                 //ESP_LOGE(TAG, "Failed to transmit data");
                 return ret;
             }
     }
+    // printf("DI sent\n");
     return ret;
 }
 
-bool shoalbot_slave_i2c::get_di() {
-    if(new_DI) {
-        new_DI = false;
+bool shoalbot_slave_i2c::get_state() {
+    if(new_State) {
+        new_State = false;
         return true;
     }
     else {
@@ -131,17 +155,20 @@ bool shoalbot_slave_i2c::get_do() {
         return false;
     }
 }
-/*
-bool shoalbot_slave_i2c::get_bms() {
-    if(new_BMS) {
-        new_BMS = false;
-        return true;
-    }
-    else {
-        return false;
-    }
+
+
+uint16_t shoalbot_slave_i2c::return_NavState() {
+    return parsed_data_NavState;
 }
 
+uint16_t shoalbot_slave_i2c::return_DO() {
+    return parsed_data_DO;
+}
+
+uint8_t shoalbot_slave_i2c::return_BMS() {
+    return parsed_data_BMS;
+}
+/*
 bool shoalbot_slave_i2c::get_batSW() {
     if(new_batSW) {
         new_batSW = false;
@@ -152,9 +179,9 @@ bool shoalbot_slave_i2c::get_batSW() {
     }
 }
 */
-void shoalbot_slave_i2c::set_di(uint8_t* di_data) {
-    for(int i = 0; i < 3; i++) {
-        current_DI[i] = *(di_data + i);
+void shoalbot_slave_i2c::set_state(uint8_t* state_data) {
+    for(int i = 0; i < 6; i++) {
+        current_State[i] = *(state_data + i);
     }
 }
 /*
