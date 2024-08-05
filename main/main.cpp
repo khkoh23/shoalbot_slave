@@ -204,14 +204,15 @@ void readMap_DO_DI(void* arg) {
 		// ESPdi -> 0b{di0, di1, di12, di13, di14, di15, di16, di18}
 		// remap di0_data, di1_data, di_esp to current_state
 
-		// current_state[4] -> 0b{do9, do8}
+		// current_state[5] -> 0b{nav_state[7], nav_state[6], nav_state[5], nav_state[4], nav_state[3], nav_state[2], nav_state[1], nav_state[0]}
+		// current_state[4] -> 0b{0, 0, 0, 0, nav_state[9], nav_state[8], do9, do8}
 		// current_state[3] -> 0b{do1, do0, do2, do3, do4, do5, do6, do7}
 		// current_state[2] -> 0b{di7, di6, di5, di4, di3, di2, di1, di0}
 		// current_state[1] -> 0b{di15, di14, di13, di12, di11, di10, di9, di8}
 		// current_state[0] -> 0b{di23, di22, di21, di20, di19, di18, di17, di16}
 
-		current_state[5] = 0x01;
-		current_state[4] = 0x00 | r_d8 | (r_d9 << 1);
+		current_state[5] = 0xFF;
+		current_state[4] = 0x00 | r_d8 | (r_d9 << 1) | 0b10 << 2;
 		current_state[3] = 0x00 | r_d0 | (r_d1 << 1) | (r_d2 << 2) | (r_d3 << 3) | (r_d4 << 4) | (r_d5 << 5) | (r_d6 << 6) | (r_d7 << 7);
 		current_state[2] = 0x00 | ESPdi[0] | (ESPdi[1] << 1);
 		current_state[2] |= (di0_data << 2);
