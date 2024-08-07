@@ -43,7 +43,6 @@ class shoalbot_slave_i2c {
         i2c_slave_event_callbacks_t cbs;
         i2c_slave_rx_done_event_data_t rx_data;
         esp_err_t ret;  
-        SemaphoreHandle_t i2c_mutex = xSemaphoreCreateBinary();
 
         uint8_t DO_cnt = 0;
         uint16_t parsed_data_DO = 0;

@@ -51,7 +51,7 @@ esp_err_t shoalbot_slave_i2c::i2c_read() {
         parsed_data_NavState = 0;
     }
 
-    if (xQueueReceive(receive_queue, &rx_data, pdMS_TO_TICKS(1000)) == pdPASS) {
+    if (xQueueReceive(receive_queue, &rx_data, pdMS_TO_TICKS(2000)) == pdPASS) {
         if(DO_ack_flag && DO_cnt == 0) {
             // ESP_LOGI("I2C", "Data received 1: %d", *data_rcv);
             parsed_data_DO |= (*data_rcv << 8);
